@@ -2076,7 +2076,7 @@ class Backend:
                                           target.output_templ, target.depends)
 
     def is_unity(self, target: build.BuildTarget) -> bool:
-        return target.is_unity2
+        return target.is_unity
 
     def get_target_option(self, target: build.Target, name: T.Union[str, OptionKey]) -> T.Union[str, int, bool, 'WrapMode']:
         if isinstance(name, str):
@@ -2086,4 +2086,4 @@ class Backend:
         else:
             import sys
             sys.exit('Internal error: invalid option type')
-        return target.get_option2(key)
+        return target.get_option(key)

@@ -414,7 +414,7 @@ class ExtractedObjects(HoldableObject):
     pch: bool = False
 
     def __post_init__(self) -> None:
-        if self.target.is_unity2:
+        if self.target.is_unity:
             self.check_unity_compatible()
 
     def __repr__(self) -> str:
@@ -661,7 +661,7 @@ class Target(HoldableObject, metaclass=abc.ABCMeta):
     def get_options(self) -> coredata.OptionsView:
         return self.options
 
-    def get_option2(self, key: 'OptionKey') -> T.Union[str, int, bool]:
+    def get_option(self, key: 'OptionKey') -> T.Union[str, int, bool]:
         # We don't actually have wrapmode here to do an assert, so just do a
         # cast, we know what's in coredata anyway.
         # TODO: if it's possible to annotate get_option or validate_option_value
@@ -816,8 +816,8 @@ class BuildTarget(Target):
 
     # FIXME: this entire method needs to be removed.
     @property
-    def is_unity2(self) -> bool:
-        unity_opt = self.get_option2(OptionKey('unity'))
+    def is_unity(self) -> bool:
+        unity_opt = self.get_option(OptionKey('unity'))
         return unity_opt == 'on' or (unity_opt == 'subprojects' and self.subproject != '')
 
     def validate_install(self):
@@ -1004,7 +1004,7 @@ class BuildTarget(Target):
             self.compilers['c'] = self.all_compilers['c']
         if 'cython' in self.compilers:
             key = OptionKey('language', machine=self.for_machine, lang='cython')
-            value = self.get_option2(key)
+            value = self.get_option(key)
 
             try:
                 self.compilers[value] = self.all_compilers[value]
@@ -2791,7 +2791,7 @@ class CompileTarget(BuildTarget):
         return "@compile"
 
     @property
-    def is_unity2(self) -> bool:
+    def is_unity(self) -> bool:
         return False
 
     def _add_output(self, f: File) -> None:
