@@ -30,11 +30,11 @@ DEFAULT_YIELDING = False
 
 # Can't bind this near the class method it seems, sadly.
 _T = T.TypeVar('_T')
+_U = T.TypeVar('_U', bound=UserOption[_T])
 
 backendlist = ['ninja', 'vs', 'vs2010', 'vs2012', 'vs2013', 'vs2015', 'vs2017', 'vs2019', 'vs2022', 'xcode', 'none']
 genvslitelist = ['vs2022']
 buildtypelist = ['plain', 'debug', 'debugoptimized', 'release', 'minsize', 'custom']
-
 
 class UserOption(T.Generic[_T], HoldableObject):
     def __init__(self, name: str, description: str, choices: T.Optional[T.Union[str, T.List[_T]]],
@@ -68,9 +68,6 @@ class UserOption(T.Generic[_T], HoldableObject):
         self.value = self.validate_value(newvalue)
         return self.value != oldvalue
 
-_U = T.TypeVar('_U', bound=UserOption[_T])
-
-
 class UserStringOption(UserOption[str]):
     def __init__(self, name: str, description: str, value: T.Any, yielding: bool = DEFAULT_YIELDING,
                  deprecated: T.Union[bool, str, T.Dict[str, str], T.List[str]] = False):
@@ -81,6 +78,7 @@ class UserStringOption(UserOption[str]):
         if not isinstance(value, str):
             raise MesonException(f'The value of option "{self.name}" is "{value}", which is not a string.')
         return value
+
 
 class UserBooleanOption(UserOption[bool]):
     def __init__(self, name: str, description: str, value: bool, yielding: bool = DEFAULT_YIELDING,
@@ -101,6 +99,7 @@ class UserBooleanOption(UserOption[bool]):
         if value.lower() == 'false':
             return False
         raise MesonException(f'Option "{self.name}" value {value} is not boolean (true or false).')
+
 
 class UserIntegerOption(UserOption[int]):
     def __init__(self, name: str, description: str, value: T.Any, yielding: bool = DEFAULT_YIELDING,
@@ -189,6 +188,7 @@ class UserComboOption(UserOption[str]):
                                      value, _type, self.name, optionsstring))
         return value
 
+
 class UserArrayOption(UserOption[T.List[str]]):
     def __init__(self, name: str, description: str, value: T.Union[str, T.List[str]],
                  split_args: bool = False,
@@ -251,6 +251,7 @@ class UserFeatureOption(UserComboOption):
     def is_auto(self) -> bool:
         return self.value == 'auto'
 
+    
 class UserStdOption(UserComboOption):
     '''
     UserOption specific to c_std and cpp_std options. User can set a list of
