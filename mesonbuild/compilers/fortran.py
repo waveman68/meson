@@ -151,12 +151,15 @@ class GnuFortranCompiler(GnuCompiler, FortranCompiler):
         opts[key].choices = ['none'] + fortran_stds
         return opts
 
-    def get_option_compile_args(self, options: 'KeyedOptionDictType') -> T.List[str]:
+    def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
         args: T.List[str] = []
-        key = OptionKey('std', machine=self.for_machine, lang=self.language)
-        std = options[key]
-        if std.value != 'none':
-            args.append('-std=' + std.value)
+        key = OptionKey('std', lang=self.language, machine=self.for_machine)
+        if target:
+            std = env.coredata.get_option_for_target(target, key)
+        else:
+            std = env.coredata.get_option_for_subproject(key, subproject)
+        if std != 'none':
+            args.append('-std=' + std)
         return args
 
     def get_dependency_gen_args(self, outtarget: str, outfile: str) -> T.List[str]:
