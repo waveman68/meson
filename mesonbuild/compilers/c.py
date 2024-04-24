@@ -462,10 +462,9 @@ class VisualStudioLikeCCompilerMixin(CompilerMixinBase):
             ),
         )
 
-    def get_option_link_args(self, options: 'KeyedOptionDictType') -> T.List[str]:
-        # need a TypeDict to make this work
+    def get_option_link_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
         key = OptionKey('winlibs', machine=self.for_machine, lang=self.language)
-        libs = options[key].value.copy()
+        libs = env.coredata.get_option_for_target(target, key).copy()
         assert isinstance(libs, list)
         for l in libs:
             assert isinstance(l, str)
@@ -498,13 +497,14 @@ class VisualStudioCCompiler(MSVCCompiler, VisualStudioLikeCCompilerMixin, CCompi
         std_opt.set_versions(stds, gnu=True, gnu_deprecated=True)
         return opts
 
-    def get_option_compile_args(self, options: 'KeyedOptionDictType') -> T.List[str]:
+    def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
         args = []
-        std = options[OptionKey('std', machine=self.for_machine, lang=self.language)]
+        key = OptionKey('std', machine=self.for_machine, lang=self.language)
+        std = env.coredata.get_option_for_target(target, key)
         # As of MVSC 16.8, /std:c11 and /std:c17 are the only valid C standard options.
-        if std.value in {'c11'}:
+        if std in {'c11'}:
             args.append('/std:c11')
-        elif std.value in {'c17', 'c18'}:
+        elif std in {'c17', 'c18'}:
             args.append('/std:c17')
         return args
 
