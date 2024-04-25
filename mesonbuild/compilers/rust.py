@@ -170,12 +170,15 @@ class RustCompiler(Compiler):
         # provided by the linker flags.
         return []
 
-    def get_option_compile_args(self, options: 'KeyedOptionDictType') -> T.List[str]:
+    def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
         args = []
         key = OptionKey('std', machine=self.for_machine, lang=self.language)
-        std = options[key]
-        if std.value != 'none':
-            args.append('--edition=' + std.value)
+        if target:
+            std = env.coredata.get_option_for_target(target, key)
+        else:
+            std = env.coredata.get_option_for_subproject(key, subproject)
+        if std != 'none':
+            args.append('--edition=' + std)
         return args
 
     def get_crt_compile_args(self, crt_val: str, buildtype: str) -> T.List[str]:
