@@ -313,10 +313,7 @@ class GnuCCompiler(GnuCompiler, CCompiler):
     def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
         args = []
         key = OptionKey('std', lang=self.language, machine=self.for_machine)
-        if target:
-            std = env.coredata.get_option_for_target(target, key)
-        else:
-            std = env.coredata.get_option_for_subproject(key, subproject)
+        std = env.determine_option_value(key, target, subproject)
         if std != 'none':
             args.append('-std=' + std)
         return args
@@ -324,16 +321,10 @@ class GnuCCompiler(GnuCompiler, CCompiler):
     def get_option_link_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
         if self.info.is_windows() or self.info.is_cygwin():
             # without a typeddict mypy can't figure this out
-            if target:
-                libs: T.List[str] = env.get_option_for_target(target,
-                                                              OptionKey('winlibs',
-                                                                        lang=self.language,
-                                                                        machine=self.for_machine)).copy()
-            else:
-                libs: T.List[str] = env.get_option_for_subproject(OptionKey('winlibs',
-                                                                            lang=self.language,
-                                                                            machine=self.for_machine),
-                                                                            subproject).copy()
+            winkey = OptionKey('winlibs',
+                               lang=self.language,
+                               machine=self.for_machine)
+            libs: T.List[str] = env.determine_option_value(winkey, target, subproject)
 
             assert isinstance(libs, list)
             for l in libs:
@@ -434,11 +425,12 @@ class IntelCCompiler(IntelGnuLikeCompiler, CCompiler):
         std_opt.set_versions(stds, gnu=True)
         return opts
 
-    def get_option_compile_args(self, options: 'KeyedOptionDictType') -> T.List[str]:
+    def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
         args = []
-        std = options[OptionKey('std', machine=self.for_machine, lang=self.language)]
-        if std.value != 'none':
-            args.append('-std=' + std.value)
+        key = OptionKey('std', lang=self.language, machine=self.for_machine)
+        std = env.determine_option_value(key, target, subproject)
+        if std != 'none':
+            args.append('-std=' + std)
         return args
 
 
@@ -500,7 +492,7 @@ class VisualStudioCCompiler(MSVCCompiler, VisualStudioLikeCCompilerMixin, CCompi
     def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
         args = []
         key = OptionKey('std', machine=self.for_machine, lang=self.language)
-        std = env.coredata.get_option_for_target(target, key)
+        std = env.determine_option_value(key, target, subproject)
         # As of MVSC 16.8, /std:c11 and /std:c17 are the only valid C standard options.
         if std in {'c11'}:
             args.append('/std:c11')
@@ -519,9 +511,10 @@ class ClangClCCompiler(_ClangCStds, ClangClCompiler, VisualStudioLikeCCompilerMi
                            full_version=full_version)
         ClangClCompiler.__init__(self, target)
 
-    def get_option_compile_args(self, options: 'KeyedOptionDictType') -> T.List[str]:
+    def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
+        args = []
         key = OptionKey('std', machine=self.for_machine, lang=self.language)
-        std = options[key].value
+        std = env.determine_option_value(key, target, subproject)
         if std != "none":
             return [f'/clang:-std={std}']
         return []
@@ -547,14 +540,14 @@ class IntelClCCompiler(IntelVisualStudioLikeCompiler, VisualStudioLikeCCompilerM
         std_opt.set_versions(['c89', 'c99', 'c11'])
         return opts
 
-    def get_option_compile_args(self, options: 'KeyedOptionDictType') -> T.List[str]:
+    def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
         args = []
         key = OptionKey('std', machine=self.for_machine, lang=self.language)
-        std = options[key]
-        if std.value == 'c89':
+        std = env.determine_option_value(key, target, subproject)
+        if std == 'c89':
             mlog.log("ICL doesn't explicitly implement c89, setting the standard to 'none', which is close.", once=True)
-        elif std.value != 'none':
-            args.append('/Qstd:' + std.value)
+        elif std != 'none':
+            args.append('/Qstd:' + std)
         return args
 
 

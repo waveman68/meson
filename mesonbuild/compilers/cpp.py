@@ -276,16 +276,16 @@ class ClangCPPCompiler(_StdCPPLibMixin, ClangCompiler, CPPCompiler):
             )
         return opts
 
-    def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment') -> T.List[str]:
-        args: T.List[str] = []
+    def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
+        args = []
         key = OptionKey('std', machine=self.for_machine, lang=self.language)
-        std = env.get_option_for_target(target, key)
+        std = env.determine_option_value(key, target, subproject)
         if std != 'none':
             args.append(self._find_best_cpp_std(std))
 
-        non_msvc_eh_options(env.get_option_for_target(key.evolve('eh')), args)
+        non_msvc_eh_options(env.determine_option_value(key.evolve('eh'), target, subproject), args)
 
-        if env.get_option_for_target(target, key.evolve('debugstl')):
+        if env.determine_option_value(key.evolve('debugstl'), target, subproject):
             args.append('-D_GLIBCXX_DEBUG=1')
 
             # We can't do _LIBCPP_DEBUG because it's unreliable unless libc++ was built with it too:
@@ -294,7 +294,7 @@ class ClangCPPCompiler(_StdCPPLibMixin, ClangCompiler, CPPCompiler):
             if version_compare(self.version, '>=18'):
                 args.append('-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG')
 
-        if not options[key.evolve('rtti')].value:
+        if not env.determine_option_value(key.evolve('rtti'), target, subproject):
             args.append('-fno-rtti')
 
         return args
@@ -478,18 +478,12 @@ class GnuCPPCompiler(_StdCPPLibMixin, GnuCompiler, CPPCompiler):
         return opts
 
     def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
-        args: T.List[str] = []
+        args = []
         key = OptionKey('std', machine=self.for_machine, lang=self.language)
-        if target:
-            std = env.coredata.get_option_for_target(target, key)
-            rtti = env.coredata.get_option_for_target(target, key.evolve('rtti'))
-            debugstl = env.coredata.get_option_for_target(target, key.evolve('debugstl'))
-            eh = env.coredata.get_option_for_target(target, key.evolve('eh'))
-        else:
-            std = env.coredata.get_option_for_subproject(key, subproject)
-            rtti = env.coredata.get_option_for_subproject(key.evolve('rtti'), subproject)
-            debugstl = env.coredata.get_option_for_subproject(key.evolve('debugstl'), subproject)
-            eh = env.coredata.get_option_for_subproject(key.evolve('eh'), subproject)
+        std = env.determine_option_value(key, target, subproject)
+        rtti = env.determine_option_value(key.evolve('rtti'), target, subproject)
+        debugstl = env.determine_option_value(key.evolve('debugstl'), target, subproject)
+        eh = env.determine_option_value(key.evolve('eh'), target, subproject)
 
         if std != 'none':
             args.append(self._find_best_cpp_std(std))
@@ -774,14 +768,9 @@ class VisualStudioLikeCPPCompilerMixin(CompilerMixinBase):
         args: T.List[str] = []
         key = OptionKey('std', machine=self.for_machine, lang=self.language)
 
-        if target is not None:
-            std = env.coredata.get_option_for_target(target, key)
-            eh = env.coredata.get_option_for_target(target, key.evolve('eh'))
-            rtti = env.coredata.get_option_for_target(target, key.evolve('rtti'))
-        else:
-            std = env.coredata.get_option_for_subproject(key, subprojct)
-            eh = env.coredata.get_option_for_target(key.evolve('eh'), subproject)
-            rtti = env.coredata.get_option_for_target(key.evolve('rtti'), subproject)
+        std = env.determine_option_value(key, target, subproject)
+        eh = env.determine_option_value(key.evolve('eh'), target, subproject)
+        rtti = env.determine_option_value(key.evolve('rtti'), target, subproject)
 
         if eh == 'default':
             args.append('/EHsc')
@@ -821,7 +810,7 @@ class CPP11AsCPP14Mixin(CompilerMixinBase):
         # (i.e., after VS2015U3)
         # if one is using anything before that point, one cannot set the standard.
         key = OptionKey('std', machine=self.for_machine, lang=self.language)
-        std = env.coredata.get_option_for_target(target, key)
+        std = env.determine_option_value(key, target, subproject)
         if std in {'vc++11', 'c++11'}:
             mlog.warning(self.id, 'does not support C++11;',
                          'attempting best effort; setting the standard to C++14',
@@ -861,7 +850,7 @@ class VisualStudioCPPCompiler(CPP11AsCPP14Mixin, VisualStudioLikeCPPCompilerMixi
 
     def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
         key = OptionKey('std', machine=self.for_machine, lang=self.language)
-        std = env.coredata.get_option_for_target(target, key)
+        std = env.determine_option_value(key, target, subproject)
         if std != 'none' and version_compare(self.version, '<19.00.24210'):
             mlog.warning('This version of MSVC does not support cpp_std arguments', fatal=False)
 
