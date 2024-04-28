@@ -480,6 +480,8 @@ class GnuCPPCompiler(_StdCPPLibMixin, GnuCompiler, CPPCompiler):
     def get_option_compile_args(self, target: 'BuildTarget', env: 'Environment', subproject=None) -> T.List[str]:
         args = []
         key = OptionKey('std', machine=self.for_machine, lang=self.language)
+        if subproject is not None:
+            key = key.evolve(subproject=subproject)
         std = env.determine_option_value(key, target, subproject)
         rtti = env.determine_option_value(key.evolve('rtti'), target, subproject)
         debugstl = env.determine_option_value(key.evolve('debugstl'), target, subproject)
