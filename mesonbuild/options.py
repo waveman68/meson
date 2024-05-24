@@ -4,6 +4,7 @@
 from collections import OrderedDict
 from itertools import chain
 import argparse
+import re
 
 from .mesonlib import (
     HoldableObject,
@@ -475,8 +476,45 @@ BUILTIN_DIR_NOPREFIX_OPTIONS: T.Dict[OptionKey, T.Dict[str, str]] = {
     OptionKey('purelibdir', module='python'): {},
 }
 
+OPTNAME_REGEX = r'(P<build>build\.)?(P<subproject>[^:]*:)?(P<name>.*)'
+OPTNAME_AND_VALUE_REGEX = OPTNAME_REGEX + r'=(P<value>.*)'
+OPTNAME_SPLITTER = re.compile(OPTNAME_REGEX)
+OPTNAME_AND_VALUE_SPLITTER = re.compile(OPTNAME_AND_VALUE_REGEX)
+
+class OptionParts:
+    def __init__(self, name, subproject=None, for_build=None):
+        self.name = name
+        self.subproject = subproject
+        self.for_build = for_build
 
 class OptionStore:
     def __init__(self):
-        # This class will hold all options for a given build directory
-        self.dummy = None
+        self.options = {}
+        self.build_options = None
+
+    def form_canonical_keystring(self, name, subproject=None, for_build=None):
+        strname = name
+        if subproject is not None:
+            strname = f'{subproject}:{strname}'
+        if for_build:
+            strname = 'build.' + strname
+        return strname
+
+    def split_keystring(self, option_str):
+        m = re.fullmatch(OPNAME_SPLITTER, option_str)
+        for_build = True if 'build' in m.groupdict() else None
+        subproject = m.groupdict().get('subproject', None)
+        name = m['name']
+        return OptionParts(name, subproject, for_build)
+
+    def add_system_option(self, name, value_object):
+        cname = self.form_canonical_keystring(name)
+        self.options[cname] = value_object
+
+    def add_project_option(self, name, subproject, keystr, value_object):
+        cname = self.form_canonical_keystring(name, subproject)
+        self.options[keystr] = value_object
+
+    def get_value_for(self, name, subproject=None):
+        cname = self.form_canonical_keystring(name, subproject)
+        return self.options[cname].value
