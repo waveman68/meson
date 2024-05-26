@@ -1225,8 +1225,8 @@ class BuildTarget(Target):
         k = OptionKey(option)
         if kwargs.get(arg) is not None:
             val = T.cast('bool', kwargs[arg])
-        elif k in self.environment.coredata.options:
-            val = self.environment.coredata.options[k].value
+        elif self.environment.coredata.optstore.has_option(k.name, k.subproject):
+            val = self.environment.coredata.optstore.get_value_for(k.name, k.subproject)
         else:
             val = False
 

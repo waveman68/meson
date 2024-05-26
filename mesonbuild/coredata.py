@@ -239,7 +239,7 @@ _V = T.TypeVar('_V')
 
 class CoreData:
 
-    def __init__(self, options: SharedCMDOptions, scratch_dir: str, meson_command: T.List[str]):
+    def __init__(self, cmd_options: SharedCMDOptions, scratch_dir: str, meson_command: T.List[str]):
         self.lang_guids = {
             'default': '8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942',
             'c': '8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942',
@@ -253,9 +253,9 @@ class CoreData:
         self.meson_command = meson_command
         self.target_guids = {}
         self.version = version
-        self.options: 'MutableKeyedOptionDictType' = {}
+        self.optstore = options.OptionStore()
         self.sp_option_overrides: T.Dict[str, str] = {}
-        self.cross_files = self.__load_config_files(options, scratch_dir, 'cross')
+        self.cross_files = self.__load_config_files(cmd_options, scratch_dir, 'cross')
         self.compilers: PerMachine[T.Dict[str, Compiler]] = PerMachine(OrderedDict(), OrderedDict())
 
         # Stores the (name, hash) of the options file, The name will be either
@@ -271,8 +271,8 @@ class CoreData:
         # For host == build configurations these caches should be the same.
         self.deps: PerMachine[DependencyCache] = PerMachineDefaultable.default(
             self.is_cross_build(),
-            DependencyCache(self.options, MachineChoice.BUILD),
-            DependencyCache(self.options, MachineChoice.HOST))
+            DependencyCache(self.optstore, MachineChoice.BUILD),
+            DependencyCache(self.optstore, MachineChoice.HOST))
 
         self.compiler_check_cache: T.Dict['CompilerCheckCacheKey', 'CompileResult'] = OrderedDict()
         self.run_check_cache: T.Dict['RunCheckCacheKey', 'RunResult'] = OrderedDict()
@@ -281,18 +281,18 @@ class CoreData:
         self.cmake_cache: PerMachine[CMakeStateCache] = PerMachine(CMakeStateCache(), CMakeStateCache())
 
         # Only to print a warning if it changes between Meson invocations.
-        self.config_files = self.__load_config_files(options, scratch_dir, 'native')
+        self.config_files = self.__load_config_files(cmd_options, scratch_dir, 'native')
         self.builtin_options_libdir_cross_fixup()
         self.init_builtins('')
 
     @staticmethod
-    def __load_config_files(options: SharedCMDOptions, scratch_dir: str, ftype: str) -> T.List[str]:
+    def __load_config_files(cmd_options: SharedCMDOptions, scratch_dir: str, ftype: str) -> T.List[str]:
         # Need to try and make the passed filenames absolute because when the
         # files are parsed later we'll have chdir()d.
         if ftype == 'cross':
-            filenames = options.cross_file
+            filenames = cmd_options.cross_file
         else:
-            filenames = options.native_file
+            filenames = cmd_options.native_file
 
         if not filenames:
             return []
@@ -402,10 +402,10 @@ class CoreData:
     def init_builtins(self, subproject: str) -> None:
         # Create builtin options with default values
         for key, opt in options.BUILTIN_OPTIONS.items():
-            self.add_builtin_option(self.options, key.evolve(subproject=subproject), opt)
+            self.add_builtin_option(self.optstore, key.evolve(subproject=subproject), opt)
         for for_machine in iter(MachineChoice):
             for key, opt in options.BUILTIN_OPTIONS_PER_MACHINE.items():
-                self.add_builtin_option(self.options, key.evolve(subproject=subproject, machine=for_machine), opt)
+                self.add_builtin_option(self.optstore, key.evolve(subproject=subproject, machine=for_machine), opt)
 
     @staticmethod
     def add_builtin_option(opts_map: 'MutableKeyedOptionDictType', key: OptionKey,
@@ -417,33 +417,23 @@ class CoreData:
             value = opts_map[key.as_root()].value
         else:
             value = None
-        opts_map[key] = opt.init_option(key, value, options.default_prefix())
+        opts_map.add_system_option(key.name, opt.init_option(key, value, options.default_prefix()))
 
     def init_backend_options(self, backend_name: str) -> None:
         if backend_name == 'ninja':
-            self.options[OptionKey('backend_max_links')] = options.UserIntegerOption(
+            self.optstore.add_system_option('backend_max_links', options.UserIntegerOption(
                 'backend_max_links',
                 'Maximum number of linker processes to run or 0 for no '
                 'limit',
-                (0, None, 0))
+                (0, None, 0)))
         elif backend_name.startswith('vs'):
-            self.options[OptionKey('backend_startup_project')] = options.UserStringOption(
+            self.optstore.add_system_option('backend_startup_project', options.UserStringOption(
                 'backend_startup_project',
                 'Default project to execute in Visual Studio',
-                '')
+                ''))
 
     def get_option(self, key: OptionKey) -> T.Union[T.List[str], str, int, bool]:
-        try:
-            return self.options[key].value
-        except KeyError:
-            pass
-
-        try:
-            return self.options[key.as_root()].value
-        except KeyError:
-            pass
-
-        raise MesonException(f'Tried to get unknown builtin option {str(key)}')
+        return self.optstore.get_value_for(key.name, key.subproject)
 
     def get_option_object_for_target(self, target: BuildTarget, key: T.Union[str, OptionKey]) -> 'UserOption[T.Any]':
         return self.get_option_for_subproject(key, target.subproject)
@@ -471,14 +461,18 @@ class CoreData:
         return self.compute_value_for_subproject_option(option_object, key.name, subproject)
 
     def get_option_object_for_subproject(self, key: T.Union[str, OptionKey], subproject) -> T.Union[T.List[str], str, int, bool, WrapMode]:
-        if not key.is_project():
-            opt = self.options.get(key)
-            if opt is None or opt.yielding:
-                opt = self.options[key.as_root()]
+        if key.lang is not None:
+            keyname = f'{key.lang}_{key.name}'
         else:
-            opt = self.options[key]
-            if opt.yielding:
-                opt = self.options.get(key.as_root(), opt)
+            keyname = key.name
+        if not key.is_project():
+            opt = self.optstore.get_value_object_for(keyname, key.subproject)
+            if opt is None or opt.yielding:
+                opt = self.optstore.get_value_object_for(keyname, '')
+        else:
+            opt = self.optstore.get_value_object_for(keyname, key.subproject)
+            if opt.yielding and self.optstore.has_option(keyname, ''):
+                opt = self.optstore.get_value_object_for(keyname, '')
         return opt
 
     def set_option(self, key: OptionKey, value, first_invocation: bool = False) -> bool:
@@ -487,11 +481,11 @@ class CoreData:
             if key.name == 'prefix':
                 value = self.sanitize_prefix(value)
             else:
-                prefix = self.options[OptionKey('prefix')].value
+                prefix = self.optstore.get_value_for('prefix')
                 value = self.sanitize_dir_option_value(prefix, key, value)
 
         try:
-            opt = self.options[key]
+            opt = self.optstore.get_value_object_for(key.name)
         except KeyError:
             raise MesonException(f'Tried to set unknown builtin option {str(key)}')
 
@@ -542,7 +536,7 @@ class CoreData:
 
     def get_nondefault_buildtype_args(self) -> T.List[T.Union[T.Tuple[str, str, str], T.Tuple[str, bool, bool]]]:
         result: T.List[T.Union[T.Tuple[str, str, str], T.Tuple[str, bool, bool]]] = []
-        value = self.options[OptionKey('buildtype')].value
+        value = self.optstore[OptionKey('buildtype')].value
         if value == 'plain':
             opt = 'plain'
             debug = False
@@ -561,8 +555,8 @@ class CoreData:
         else:
             assert value == 'custom'
             return []
-        actual_opt = self.options[OptionKey('optimization')].value
-        actual_debug = self.options[OptionKey('debug')].value
+        actual_opt = self.optstore[OptionKey('optimization')].value
+        actual_debug = self.optstore[OptionKey('debug')].value
         if actual_opt != opt:
             result.append(('optimization', actual_opt, opt))
         if actual_debug != debug:
@@ -591,8 +585,8 @@ class CoreData:
             assert value == 'custom'
             return False
 
-        dirty |= self.options[OptionKey('optimization')].set_value(opt)
-        dirty |= self.options[OptionKey('debug')].set_value(debug)
+        dirty |= self.optstore.set_option('optimization', None, opt)
+        dirty |= self.optstore.set_option('debug', None, debug)
 
         return dirty
 
@@ -604,30 +598,30 @@ class CoreData:
 
     def get_external_args(self, for_machine: MachineChoice, lang: str) -> T.List[str]:
         # mypy cannot analyze type of OptionKey
-        return T.cast('T.List[str]', self.options[OptionKey('args', machine=for_machine, lang=lang)].value)
+        return T.cast('T.List[str]', self.optstore.get_value_for(f'{lang}_args')) # FIXME machine=for_machine
 
     def get_external_link_args(self, for_machine: MachineChoice, lang: str) -> T.List[str]:
         # mypy cannot analyze type of OptionKey
-        return T.cast('T.List[str]', self.options[OptionKey('link_args', machine=for_machine, lang=lang)].value)
+        return T.cast('T.List[str]', self.optstore.get_value_for(f'{lang}_link_args')) # FIXME machine=for_machine
 
     def update_project_options(self, options: 'MutableKeyedOptionDictType', subproject: SubProject) -> None:
         for key, value in options.items():
             if not key.is_project():
                 continue
-            if key not in self.options:
-                self.options[key] = value
+            if key not in self.optstore:
+                self.optstore[key] = value
                 continue
             if key.subproject != subproject:
                 raise MesonBugException(f'Tried to set an option for subproject {key.subproject} from {subproject}!')
 
-            oldval = self.options[key]
+            oldval = self.optstore[key]
             if type(oldval) is not type(value):
-                self.options[key] = value
+                self.optstore[key] = value
             elif oldval.choices != value.choices:
                 # If the choices have changed, use the new value, but attempt
                 # to keep the old options. If they are not valid keep the new
                 # defaults but warn.
-                self.options[key] = value
+                self.optstore[key] = value
                 try:
                     value.set_value(oldval.value)
                 except MesonException:
@@ -635,9 +629,9 @@ class CoreData:
                                  fatal=False)
 
         # Find any extranious keys for this project and remove them
-        for key in self.options.keys() - options.keys():
+        for key in self.optstore.keys() - options.keys():
             if key.is_project() and key.subproject == subproject:
-                del self.options[key]
+                del self.optstore[key]
 
     def is_cross_build(self, when_building_for: MachineChoice = MachineChoice.HOST) -> bool:
         if when_building_for == MachineChoice.BUILD:
@@ -645,16 +639,19 @@ class CoreData:
         return len(self.cross_files) > 0
 
     def copy_build_options_from_regular_ones(self) -> bool:
+        # FIXME, needs cross compilation support.
+        if True:
+            return False
         dirty = False
         assert not self.is_cross_build()
         for k in options.BUILTIN_OPTIONS_PER_MACHINE:
-            o = self.options[k]
-            dirty |= self.options[k.as_build()].set_value(o.value)
-        for bk, bv in self.options.items():
+            o = self.optstore.get_value_object_for(k.name)
+            dirty |= self.optstore.set_value(k.name, k.subproject, True, o.value)
+        for bk, bv in self.optstore.items():
             if bk.machine is MachineChoice.BUILD:
                 hk = bk.as_host()
                 try:
-                    hv = self.options[hk]
+                    hv = self.optstore[hk]
                     dirty |= bv.set_value(hv.value)
                 except KeyError:
                     continue
@@ -669,16 +666,16 @@ class CoreData:
         pfk = OptionKey('prefix')
         if pfk in opts_to_set:
             prefix = self.sanitize_prefix(opts_to_set[pfk])
-            dirty |= self.options[OptionKey('prefix')].set_value(prefix)
+            dirty |= self.optstore[OptionKey('prefix')].set_value(prefix)
             for key in options.BUILTIN_DIR_NOPREFIX_OPTIONS:
                 if key not in opts_to_set:
-                    dirty |= self.options[key].set_value(options.BUILTIN_OPTIONS[key].prefixed_default(key, prefix))
+                    dirty |= self.optstore[key].set_value(options.BUILTIN_OPTIONS[key].prefixed_default(key, prefix))
 
         unknown_options: T.List[OptionKey] = []
         for k, v in opts_to_set.items():
             if k == pfk:
                 continue
-            elif k in self.options:
+            elif self.optstore.has_option(k.name, None):
                 dirty |= self.set_option(k, v, first_invocation)
             elif k.machine != MachineChoice.BUILD and k.type != OptionType.COMPILER:
                 empty = k.name
@@ -722,7 +719,7 @@ class CoreData:
                 raise MesonException(f'Override {keystr} already exists.')
             key = OptionKey.from_string(keystr)
             original_key = key.evolve(subproject='')
-            if original_key not in self.options:
+            if original_key not in self.optstore:
                 raise MesonException('Tried to override a nonexisting key.')
             self.sp_option_overrides[keystr] = valstr
             dirty = True
@@ -770,7 +767,7 @@ class CoreData:
             # Always test this using the HOST machine, as many builtin options
             # are not valid for the BUILD machine, but the yielding value does
             # not differ between them even when they are valid for both.
-            if subproject and k.is_builtin() and self.options[k.evolve(subproject='', machine=MachineChoice.HOST)].yielding:
+            if subproject and k.is_builtin() and self.optstore[k.evolve(subproject='', machine=MachineChoice.HOST)].yielding:
                 continue
             # Skip base, compiler, and backend options, they are handled when
             # adding languages and setting backend.
@@ -790,16 +787,16 @@ class CoreData:
             if value is not None:
                 o.set_value(value)
                 if not subproject:
-                    self.options[k] = o  # override compiler option on reconfigure
-            self.options.setdefault(k, o)
+                    self.optstore[k] = o  # override compiler option on reconfigure
+            self.optstore.add_system_option(f'{k.lang}_{k.name}', o)
 
             if subproject:
                 sk = k.evolve(subproject=subproject)
                 value = env.options.get(sk) or value
                 if value is not None:
                     o.set_value(value)
-                    self.options[sk] = o  # override compiler option on reconfigure
-                self.options.setdefault(sk, o)
+                    self.optstore[sk] = o  # override compiler option on reconfigure
+                self.optstore.setdefault(sk, o)
 
     def add_lang_args(self, lang: str, comp: T.Type['Compiler'],
                       for_machine: MachineChoice, env: 'Environment') -> None:
@@ -807,8 +804,9 @@ class CoreData:
         from .compilers import compilers
         # These options are all new at this point, because the compiler is
         # responsible for adding its own options, thus calling
-        # `self.options.update()`` is perfectly safe.
-        self.options.update(compilers.get_global_options(lang, comp, for_machine, env))
+        # `self.optstore.update()`` is perfectly safe.
+        for key, valobj in compilers.get_global_options(lang, comp, for_machine, env).items():
+            self.optstore.add_system_option(f'{key.lang}_{key.name}', valobj)
 
     def process_compiler_options(self, lang: str, comp: Compiler, env: Environment, subproject: str) -> None:
         from . import compilers
@@ -821,20 +819,20 @@ class CoreData:
                 skey = key.evolve(subproject=subproject)
             else:
                 skey = key
-            if skey not in self.options:
-                self.options[skey] = copy.deepcopy(compilers.base_options[key])
+            if not self.optstore.has_option(skey.name, None):
+                self.optstore.add_system_option(skey.name, copy.deepcopy(compilers.base_options[key]))
                 if skey in env.options:
-                    self.options[skey].set_value(env.options[skey])
+                    self.optstore[skey].set_value(env.options[skey])
                     enabled_opts.append(skey)
                 elif subproject and key in env.options:
-                    self.options[skey].set_value(env.options[key])
+                    self.optstore[skey].set_value(env.options[key])
                     enabled_opts.append(skey)
-                if subproject and key not in self.options:
-                    self.options[key] = copy.deepcopy(self.options[skey])
+                if subproject and key not in self.optstore:
+                    self.optstore[key] = copy.deepcopy(self.optstore[skey])
             elif skey in env.options:
-                self.options[skey].set_value(env.options[skey])
+                self.optstore[skey].set_value(env.options[skey])
             elif subproject and key in env.options:
-                self.options[skey].set_value(env.options[key])
+                self.optstore[skey].set_value(env.options[key])
         self.emit_base_options_warnings(enabled_opts)
 
     def emit_base_options_warnings(self, enabled_opts: T.List[OptionKey]) -> None:
