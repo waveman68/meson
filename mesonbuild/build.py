@@ -18,6 +18,7 @@ from . import coredata
 from . import dependencies
 from . import mlog
 from . import programs
+from . import options
 from .mesonlib import (
     HoldableObject, SecondLevelHolder,
     File, MesonException, MachineChoice, PerMachine, OrderedSet, listify,
@@ -1222,11 +1223,11 @@ class BuildTarget(Target):
             mlog.warning(f"Use the '{arg}' kwarg instead of passing '-f{arg}' manually to {self.name!r}")
             return True
 
-        k = OptionKey(option)
+        k = options.OptionParts(option)
         if kwargs.get(arg) is not None:
             val = T.cast('bool', kwargs[arg])
-        elif self.environment.coredata.optstore.has_option(k.name, k.subproject):
-            val = self.environment.coredata.optstore.get_value_for(k.name, k.subproject)
+        elif self.environment.coredata.optstore.has_option(k):
+            val = self.environment.coredata.optstore.get_value_for(k)
         else:
             val = False
 
