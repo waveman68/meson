@@ -788,7 +788,9 @@ class CoreData:
             if value is not None:
                 o.set_value(value)
                 if not subproject:
-                    self.optstore[k] = o  # override compiler option on reconfigure
+                    # FIXME, add augment
+                    #self.optstore[k] = o  # override compiler option on reconfigure
+                    pass
             self.optstore.add_system_option(f'{k.lang}_{k.name}', o)
 
             # FIXME
